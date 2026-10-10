@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jutsu Cam — Hand Gesture Demo</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, Segoe UI, sans-serif; background: #10131c; color: #f4f5fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    main { width: min(880px, 100%); }
+    h1 { margin: 0 0 8px; font-size: clamp(2rem, 5vw, 3rem); }
+    p { color: #b8bfd2; line-height: 1.55; }
+    .card { margin-top: 22px; border: 1px solid #30384b; border-radius: 18px; overflow: hidden; background: #191e2b; }
+    .stage { aspect-ratio: 16 / 9; background: radial-gradient(ellipse at center, #252e43, #10131c 72%); display: grid; place-items: center; position: relative; overflow: hidden; }
+    .stage:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border-radius: 0; background: #000; }
+    video, canvas { display: none; width: 100%; height: 100%; position: absolute; inset: 0; transform: scaleX(-1); }
+    video { object-fit: cover; }
+    canvas { pointer-events: none; }
+    .placeholder { text-align: center; padding: 24px; color: #bdc5d8; }
+    .placeholder strong { display: block; color: white; font-size: 1.2rem; margin-bottom: 8px; }
+    .controls { padding: 18px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .camera-source { padding-bottom: 0; }
+    .source-label { color: #c7cde0; font-weight: 700; }
+    .source-button { background: #30384b; }
+    .source-button[aria-pressed="true"] { background: #7c5cff; }
+    .phone-pairing { display: none; margin: 16px 18px; padding: 16px; border: 1px solid #39445a; border-radius: 12px; background: #111722; color: #d9dfed; }
+    .phone-pairing p { margin: 7px 0; }
+    .phone-pairing code { display: inline-block; padding: 8px 12px; border-radius: 8px; background: #20283a; color: white; font-size: 1.1rem; letter-spacing: .12em; overflow-wrap: anywhere; }
+    .phone-pairing a { color: #c3b7ff; }
+    button { border: 0; border-radius: 10px; padding: 12px 18px; background: #7c5cff; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #927aff; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { color: #c7cde0; }
+    .note { font-size: .9rem; }
+    .badge { position: absolute; z-index: 2; top: 14px; left: 14px; padding: 7px 11px; border-radius: 999px; background: #10131ccc; color: #d9d4ff; font-size: .85rem; display: none; }
+    .performance { position: absolute; z-index: 2; left: 14px; bottom: 14px; padding: 7px 11px; border-radius: 8px; background: #10131ccc; color: #e6e8f2; font: 12px/1.4 ui-monospace, Consolas, monospace; display: none; }
+    .fullscreen-button { display: none; position: absolute; z-index: 6; top: 14px; right: 14px; padding: 8px 11px; border: 1px solid #ffffff55; border-radius: 9px; color: white; background: #10131ccc; font-size: .9rem; }
+    .fullscreen-button:hover { background: #30384b; }
+    .clone-layer { position: absolute; z-index: 3; inset: 0; display: none; overflow: hidden; pointer-events: none; }
+    .clone-layer.active { display: block; }
+    .clone-layer.removing .clone-photo-left { animation: clone-return-left .85s ease-in both; }
+    .clone-layer.removing .clone-photo-right { animation: clone-return-right .85s ease-in both; }
+    .jutsu-effect { position: absolute; z-index: 4; inset: 0; display: none; overflow: hidden; pointer-events: none; }
+    .jutsu-effect.active { display: block; }
+    .smoke-cloud { position: absolute; top: var(--clone-origin-y, 50%); left: var(--clone-origin-x, 50%); width: min(34vw, 270px); aspect-ratio: 1.45; opacity: 0; background: radial-gradient(ellipse at 50% 58%, #f8fbff 0 12%, #e6edf4e8 28%, #cbd4de9c 46%, transparent 72%); filter: blur(7px) drop-shadow(0 0 14px #e7eef7aa); animation: smoke-bloom 1.15s cubic-bezier(.16,.7,.25,1) .08s both; }
+    .smoke-cloud::before, .smoke-cloud::after { content: ""; position: absolute; width: 58%; height: 75%; border-radius: 50%; background: radial-gradient(ellipse, #f8fbff 0 18%, #e1e8efdc 45%, transparent 73%); filter: blur(5px); }
+    .smoke-cloud::before { left: 4%; top: 5%; }
+    .smoke-cloud::after { right: 2%; top: 0; }
+    .smoke-cloud-left { animation-delay: .12s; }
+    .smoke-cloud-right { animation-delay: .2s; }
+    .clone-photo { display: block; position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; opacity: 0; transform-origin: var(--clone-origin-x, 50%) var(--clone-origin-y, 85%); filter: saturate(1.05) contrast(1.08) drop-shadow(0 0 8px #e7eef7); mix-blend-mode: normal; }
+    .clone-photo-left { animation: clone-left 1.5s cubic-bezier(.12,.7,.25,1) both; }
+    .clone-photo-right { animation: clone-right 1.5s cubic-bezier(.12,.7,.25,1) both; }
+    .jutsu-title { position: absolute; z-index: 2; left: 50%; bottom: 8%; transform: translateX(-50%); padding: 7px 12px; border-radius: 999px; color: white; text-align: center; font-weight: 800; letter-spacing: .08em; text-shadow: 0 1px 4px #26303a; background: #202833aa; animation: title-pop 1.1s ease-out both; white-space: nowrap; }
+    .jutsu-title small { display: none; }
+    .gesture-status { min-height: 1.5em; color: #d9d4ff; }
+    @keyframes smoke-bloom { 0% { transform: translate(-50%, -50%) translateY(22px) scale(.2); opacity: 0; } 18% { opacity: .96; } 54% { transform: translate(-50%, -50%) translateY(-8px) scale(1.08); opacity: .82; } 100% { transform: translate(-50%, -50%) translateY(-48px) scale(1.65); opacity: 0; } }
+    @keyframes title-pop { 0% { opacity: 0; transform: translateX(-50%) scale(.8); } 15%, 55% { opacity: 1; transform: translateX(-50%) scale(1); } 100% { opacity: 0; transform: translateX(-50%) scale(1.04); } }
+    @keyframes clone-left { 0% { transform: translateX(0) scale(.72); opacity: 0; } 8% { transform: translateX(0) scale(.8); opacity: .35; } 22% { transform: translateX(-8%) scale(.92); opacity: .9; } 48%, 100% { transform: translateX(-30%) scale(1); opacity: 1; } }
+    @keyframes clone-right { 0% { transform: translateX(0) scale(.72); opacity: 0; } 8% { transform: translateX(0) scale(.8); opacity: .35; } 22% { transform: translateX(8%) scale(.92); opacity: .9; } 48%, 100% { transform: translateX(30%) scale(1); opacity: 1; } }
+    @keyframes clone-return-left { from { transform: translateX(-30%) scale(1); opacity: 1; } 70% { transform: translateX(-7%) scale(.92); opacity: .85; } to { transform: translateX(0) scale(.72); opacity: 0; } }
+    @keyframes clone-return-right { from { transform: translateX(30%) scale(1); opacity: 1; } 70% { transform: translateX(7%) scale(.92); opacity: .85; } to { transform: translateX(0) scale(.72); opacity: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Jutsu Cam</h1>
+    <p>Hand tracking runs in the background so the page stays responsive. Camera frames are reduced for speed, and adaptive smoothing steadies the finger points while letting fast movements catch up.</p>
+    <section class="card" aria-label="Camera preview and hand tracking">
+      <div class="stage" id="stage">
+        <div class="placeholder" id="placeholder"><strong>Camera is off</strong>Press “Start camera + tracking” and allow camera access when your browser asks.</div>
+        <button class="fullscreen-button" id="fullscreenButton" type="button" aria-label="Enter camera fullscreen">⛶ Fullscreen</button>
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <span class="badge" id="badge">Hand tracking on</span>
+        <span class="performance" id="performance" aria-live="off">Waiting for camera frames…</span>
+        <div class="clone-layer" id="cloneLayer" aria-hidden="true">
+          <canvas class="clone-photo clone-photo-left" id="cloneLeft"></canvas>
+          <canvas class="clone-photo clone-photo-right" id="cloneRight"></canvas>
+        </div>
+        <div class="jutsu-effect" id="jutsuEffect" aria-hidden="true">
+          <span class="smoke-cloud smoke-cloud-left"></span>
+          <span class="smoke-cloud smoke-cloud-center"></span>
+          <span class="smoke-cloud smoke-cloud-right"></span>
+          <div class="jutsu-title">影分身の術<small>SHADOW CLONE JUTSU</small></div>
+        </div>
+      </div>
+      <div class="controls camera-source" aria-label="Choose camera source">
+        <span class="source-label">Camera source:</span>
+        <button class="source-button" id="computerCameraButton" type="button" aria-pressed="true">This computer</button>
+        <button class="source-button" id="phoneCameraButton" type="button" aria-pressed="false">Use phone camera</button>
+      </div>
+      <div class="controls">
+        <button id="startButton">Start camera + tracking</button>
+        <button id="stopButton" disabled>Stop camera</button>
+        <button id="calibrateButton" disabled>Capture empty background</button>
+        <span id="status" role="status">Waiting for you to start.</span>
+      </div>
+      <div class="phone-pairing" id="phonePairing" aria-live="polite">
+        <strong>Connect your phone camera</strong>
+        <p id="phonePairingMessage">Start the phone connection to get a pairing code.</p>
+        <p>On your phone, open the same HTTPS app address followed by <code>phone.html</code>, then enter this code:</p>
+        <p>Phone page: <a id="phonePageLink" href="phone.html">phone.html</a></p>
+        <p><code id="phonePairingCode">—</code></p>
+        <p>Keep both devices online and preferably on the same Wi-Fi. Camera video is sent directly between the devices after pairing.</p>
+      </div>
+      <div class="controls gesture-status" id="gestureStatus">Shadow Clone seal: extend the index + middle finger pair on both hands; hold one pair upright and cross the other over it. Curl ring + little fingers. Hold to summon; release, then repeat to dismiss.</div>
+      <p class="note" id="cloneCalibrationStatus">To make a body-shaped clone, start the camera, step out of view, then capture the empty background.</p>
+    </section>
+    <p class="note">For steadier points, keep your whole hand in view and use bright, even light. Center yourself and frame as much of your body as the camera can see; clones copy that visible area. Computer-camera frames are processed on this computer. Phone-camera mode sends live video directly to the paired computer; neither mode records or saves video.</p>
+  </main>
+<script type="module">
+  import { DrawingUtils, HandLandmarker } from './vendor/tasks-vision/vision_bundle.mjs';
+
+  const video = document.querySelector('#video');
+  const stage = document.querySelector('#stage');
+  const overlay = document.querySelector('#overlay');
+  const ctx = overlay.getContext('2d');
+  const drawing = new DrawingUtils(ctx);
+  const startButton = document.querySelector('#startButton');
+  const stopButton = document.querySelector('#stopButton');
+  const fullscreenButton = document.querySelector('#fullscreenButton');
+  const computerCameraButton = document.querySelector('#computerCameraButton');
+  const phoneCameraButton = document.querySelector('#phoneCameraButton');
+  const phonePairing = document.querySelector('#phonePairing');
+  const phonePairingMessage = document.querySelector('#phonePairingMessage');
+  const phonePairingCode = document.querySelector('#phonePairingCode');
+  const phonePageLink = document.querySelector('#phonePageLink');
+  const calibrateButton = document.querySelector('#calibrateButton');
+  const cloneCalibrationStatus = document.querySelector('#cloneCalibrationStatus');
+  const cloneLayer = document.querySelector('#cloneLayer');
+  const status = document.querySelector('#status');
+  const placeholder = document.querySelector('#placeholder');
+  const badge = document.querySelector('#badge');
+  const performanceReadout = document.querySelector('#performance');
+  const gestureStatus = document.querySelector('#gestureStatus');
+  const jutsuEffect = document.querySelector('#jutsuEffect');
+  const cloneCanvases = [document.querySelector('#cloneLeft'), document.querySelector('#cloneRight')];
+  const cloneContexts = cloneCanvases.map(canvas => canvas.getContext('2d'));
+  const backgroundCanvas = document.createElement('canvas');
+  backgroundCanvas.width = 320;
+  backgroundCanvas.height = 240;
+  const backgroundContext = backgroundCanvas.getContext('2d', { willReadFrequently: true });
+  let activeStream;
+  let localStream;
+  let cameraSource = 'computer';
+  let phonePeer;
+  let phoneCall;
+  let peerClientPromise;
+  let worker;
+  let workerReadyPromise;
+  let resolveWorkerReady;
+  let rejectWorkerReady;
+  let workerBusy = false;
+  let workerFailed = false;
+  let animationFrame;
+  let lastVideoTime = -1;
+  let lastVideoTimeForStats = -1;
+  let lastFrameSentAt = 0;
+  let latestLandmarks = [];
+  let previousLandmarks = [];
+  let lastStatus = '';
+  let statsWindowStartedAt = 0;
+  let cameraFramesInWindow = 0;
+  let trackingUpdatesInWindow = 0;
+  let measuredCameraFps = 0;
+  let measuredTrackingFps = 0;
+  let latestInferenceMs = 0;
+  let processingSize = '—';
+  let activeDelegate = '—';
+  let sealStartedAt = 0;
+  let sealLastSeenAt = 0;
+  let sealTriggered = false;
+  let clonesVisible = false;
+  let backgroundPixels = null;
+  let lastCloneFrameAt = 0;
+  let lastJutsuAt = 0;
+  let effectTimeout;
+  let cloneTimeout;
+  const DETECTION_INTERVAL_MS = 50;
+  const PROCESSING_WIDTH = 480;
+  const PROCESSING_HEIGHT = 360;
+
+  function setStatus(message) {
+    if (message !== lastStatus) {
+      status.textContent = message;
+      lastStatus = message;
+    }
+  }
+
+  function smoothLandmarks(landmarks) {
+    if (landmarks.length !== previousLandmarks.length) {
+      previousLandmarks = landmarks.map(hand => hand.map(point => ({ ...point })));
+      return previousLandmarks.map(hand => hand.map(point => ({ ...point })));
+    }
+    const smoothed = landmarks.map((hand, handIndex) => hand.map((point, pointIndex) => {
+      const previous = previousLandmarks[handIndex][pointIndex];
+      const movement = Math.hypot(point.x - previous.x, point.y - previous.y);
+      // Keep the filter light: low smoothing makes small finger movements lag.
+      // Increase responsiveness as the hand moves faster.
+      const alpha = Math.min(0.96, 0.72 + movement * 7);
+      return {
+        x: previous.x + (point.x - previous.x) * alpha,
+        y: previous.y + (point.y - previous.y) * alpha,
+        z: previous.z + (point.z - previous.z) * alpha
+      };
+    }));
+    previousLandmarks = smoothed;
+    return smoothed.map(hand => hand.map(point => ({ ...point })));
+  }
+
+  const distance2d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  function otherFingersAreCurled(hand) {
+    return [[16, 14, 13], [20, 18, 17]].every(([tip, pip, mcp]) =>
+      distance2d(hand[tip], hand[mcp]) < distance2d(hand[pip], hand[mcp]) * 1.65
+    );
+  }
+
+  function indexMiddlePair(hand) {
+    return {
+      start: { x: (hand[5].x + hand[9].x) / 2, y: (hand[5].y + hand[9].y) / 2 },
+      joint: { x: (hand[6].x + hand[10].x) / 2, y: (hand[6].y + hand[10].y) / 2 },
+      end: { x: (hand[8].x + hand[12].x) / 2, y: (hand[8].y + hand[12].y) / 2 }
+    };
+  }
+
+  function indexAndMiddleAreStraight(hand) {
+    const pair = indexMiddlePair(hand);
+    // Measure the two raised fingers as one shape so a noisy/partly hidden
+    // landmark on either finger does not make the entire seal flicker off.
+    return distance2d(pair.end, pair.start) > distance2d(pair.joint, pair.start) * 1.5;
+  }
+
+  function pointToSegmentDistance(point, start, end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (!lengthSquared) return distance2d(point, start);
+    const projection = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+    return Math.hypot(point.x - (start.x + projection * dx), point.y - (start.y + projection * dy));
+  }
+
+  function fingerSegmentsCross(a, b, tolerance) {
+    const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    const aSide1 = cross(a.start, a.end, b.start);
+    const aSide2 = cross(a.start, a.end, b.end);
+    const bSide1 = cross(b.start, b.end, a.start);
+    const bSide2 = cross(b.start, b.end, a.end);
+    if (aSide1 * aSide2 < 0 && bSide1 * bSide2 < 0) return true;
+    const gap = Math.min(
+      pointToSegmentDistance(a.start, b.start, b.end), pointToSegmentDistance(a.end, b.start, b.end),
+      pointToSegmentDistance(b.start, a.start, a.end), pointToSegmentDistance(b.end, a.start, a.end)
+    );
+    return gap < tolerance;
+  }
+
+  function getShadowCloneSealProblem(hands) {
+    if (hands.length < 2) return 'Show both hands clearly in the camera.';
+    if (!hands.every(indexAndMiddleAreStraight)) return 'Extend the index + middle fingers together on both hands.';
+    if (!hands.every(otherFingersAreCurled)) return 'Curl the ring and little fingers on both hands.';
+    const fingerPairs = hands.map(indexMiddlePair);
+    const pairIsVertical = ({ start, end }) => {
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      return dy < 0 && Math.abs(dy) > Math.abs(dx);
+    };
+    const pairIsHorizontal = ({ start, end }) =>
+      Math.abs(end.x - start.x) > Math.abs(end.y - start.y);
+    const verticalPair = pairIsVertical(fingerPairs[0]) && pairIsHorizontal(fingerPairs[1]) ? fingerPairs[0]
+      : pairIsVertical(fingerPairs[1]) && pairIsHorizontal(fingerPairs[0]) ? fingerPairs[1]
+      : null;
+    const horizontalPair = verticalPair === fingerPairs[0] ? fingerPairs[1]
+      : verticalPair === fingerPairs[1] ? fingerPairs[0]
+      : null;
+    if (!verticalPair || !horizontalPair) return 'Turn one finger pair upright and the other pair sideways.';
+    const palmWidths = hands.map(hand => distance2d(hand[5], hand[17]));
+    const crossingTolerance = (palmWidths[0] + palmWidths[1]) * 0.42;
+    if (!fingerSegmentsCross(verticalPair, horizontalPair, crossingTolerance)) return 'Bring the upright and sideways finger pairs together so they cross.';
+    return '';
+  }
+
+  function processGesture(hands) {
+    if (!backgroundPixels) {
+      gestureStatus.textContent = 'First step out of view and click “Capture empty background” for your body clone.';
+      return;
+    }
+    const now = performance.now();
+    const sealProblem = getShadowCloneSealProblem(hands);
+    const sealDetected = !sealProblem;
+    if (sealDetected) {
+      if (!sealStartedAt || now - sealLastSeenAt > 260) {
+        sealStartedAt = now;
+        sealTriggered = false;
+      }
+      sealLastSeenAt = now;
+      const heldMs = now - sealStartedAt;
+      if (!sealTriggered && now - lastJutsuAt > 900 && heldMs >= 650) {
+        sealTriggered = true;
+        lastJutsuAt = now;
+        clearTimeout(cloneTimeout);
+        if (clonesVisible) {
+          clonesVisible = false;
+          cloneLayer.classList.remove('removing');
+          void cloneLayer.offsetWidth;
+          cloneLayer.classList.add('removing');
+          cloneTimeout = setTimeout(() => {
+            cloneLayer.classList.remove('active', 'removing');
+            cloneContexts.forEach((context, index) => context.clearRect(0, 0, cloneCanvases[index].width, cloneCanvases[index].height));
+          }, 900);
+          gestureStatus.textContent = 'Clones dismissed — release the seal, then hold it again to bring them back.';
+        } else {
+          clonesVisible = true;
+          updateCloneFrames();
+          lastCloneFrameAt = now;
+          cloneLayer.classList.remove('removing', 'active');
+          void cloneLayer.offsetWidth;
+          cloneLayer.classList.add('active');
+          gestureStatus.textContent = 'Shadow clones are here — release the seal, then make it again to dismiss them.';
+        }
+        jutsuEffect.classList.remove('active');
+        void jutsuEffect.offsetWidth;
+        jutsuEffect.classList.add('active');
+        clearTimeout(effectTimeout);
+        effectTimeout = setTimeout(() => {
+          jutsuEffect.classList.remove('active');
+        }, 1850);
+      } else if (sealTriggered) {
+        gestureStatus.textContent = clonesVisible
+          ? 'Shadow clones are here — release both hands, then make the seal again to dismiss them.'
+          : 'Clones are disappearing — release both hands, then make the seal again to bring them back.';
+      } else if (now - lastJutsuAt <= 900) {
+        gestureStatus.textContent = 'Shadow Clone Jutsu is recharging…';
+      } else {
+        gestureStatus.textContent = `Shadow Clone sign detected — hold… ${Math.min(100, Math.round(heldMs / 6.5))}%`;
+      }
+    } else if (sealStartedAt && now - sealLastSeenAt <= 220) {
+      const heldMs = now - sealStartedAt;
+      gestureStatus.textContent = `Seal almost there — hold steady… ${Math.min(99, Math.round(heldMs / 6.5))}%`;
+    } else {
+      sealStartedAt = 0;
+      sealLastSeenAt = 0;
+      sealTriggered = false;
+      gestureStatus.textContent = sealProblem;
+    }
+  }
+
+  function updateCloneFrames() {
+    if (!video.videoWidth || !video.videoHeight) return;
+    const width = 320;
+    const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth));
+    if (backgroundPixels && (backgroundCanvas.width !== width || backgroundCanvas.height !== height)) {
+      backgroundPixels = null;
+      cloneCalibrationStatus.textContent = 'Camera size changed. Capture the empty background again before making a clone.';
+    }
+    if (backgroundCanvas.width !== width || backgroundCanvas.height !== height) {
+      backgroundCanvas.width = width;
+      backgroundCanvas.height = height;
+    }
+    cloneCanvases.forEach((canvas, index) => {
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const context = cloneContexts[index];
+      if (index === 0) {
+        context.clearRect(0, 0, width, height);
+        context.save();
+        context.translate(width, 0);
+        context.scale(-1, 1);
+        context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, width, height);
+        context.restore();
+        if (backgroundPixels) {
+          const frame = context.getImageData(0, 0, width, height);
+          const pixels = frame.data;
+          const background = backgroundPixels.data;
+          let foregroundXTotal = 0;
+          let foregroundYTotal = 0;
+          let foregroundPixelCount = 0;
+          for (let p = 0; p < pixels.length; p += 4) {
+            const difference = Math.max(
+              Math.abs(pixels[p] - background[p]),
+              Math.abs(pixels[p + 1] - background[p + 1]),
+              Math.abs(pixels[p + 2] - background[p + 2])
+            );
+            pixels[p + 3] = Math.max(0, Math.min(235, (difference - 24) * 5));
+            if (difference > 48) {
+              const pixelIndex = p >> 2;
+              foregroundXTotal += pixelIndex % width;
+              foregroundYTotal += Math.floor(pixelIndex / width);
+              foregroundPixelCount++;
+            }
+          }
+          if (foregroundPixelCount > 100) {
+            const originX = `${Math.round(foregroundXTotal / foregroundPixelCount / width * 100)}%`;
+            const originY = `${Math.round(foregroundYTotal / foregroundPixelCount / height * 100)}%`;
+            cloneCanvases.forEach(canvas => {
+              canvas.style.setProperty('--clone-origin-x', originX);
+              canvas.style.setProperty('--clone-origin-y', originY);
+            });
+            jutsuEffect.style.setProperty('--clone-origin-x', originX);
+            jutsuEffect.style.setProperty('--clone-origin-y', originY);
+          }
+          context.putImageData(frame, 0, 0);
+        }
+      } else {
+        context.clearRect(0, 0, width, height);
+        context.drawImage(cloneCanvases[0], 0, 0, width, height);
+      }
+    });
+  }
+
+  function captureEmptyBackground() {
+    if (!activeStream || !video.videoWidth) return;
+    const width = 320;
+    const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth));
+    backgroundCanvas.width = width;
+    backgroundCanvas.height = height;
+    backgroundContext.clearRect(0, 0, width, height);
+    backgroundContext.save();
+    backgroundContext.translate(width, 0);
+    backgroundContext.scale(-1, 1);
+    backgroundContext.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, width, height);
+    backgroundContext.restore();
+    backgroundPixels = backgroundContext.getImageData(0, 0, width, height);
+    cloneCalibrationStatus.textContent = 'Background captured in memory. Step back into the same spot; your clone will be cut out from the room.';
+    calibrateButton.textContent = 'Recapture background';
+    gestureStatus.textContent = 'Background ready. Hold the Shadow Clone seal to summon; release, then repeat it to dismiss.';
+  }
+
+  calibrateButton.addEventListener('click', captureEmptyBackground);
+
+  fullscreenButton.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement === stage) await document.exitFullscreen();
+      else await stage.requestFullscreen();
+    } catch (error) {
+      setStatus(`Could not change fullscreen mode: ${error.message}`);
+    }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    const isFullscreen = document.fullscreenElement === stage;
+    fullscreenButton.textContent = isFullscreen ? '⛶ Exit fullscreen' : '⛶ Fullscreen';
+    fullscreenButton.setAttribute('aria-label', isFullscreen ? 'Exit camera fullscreen' : 'Enter camera fullscreen');
+  });
+
+  function chooseCameraSource(source) {
+    if (!stopButton.disabled) return;
+    cameraSource = source;
+    const usePhone = source === 'phone';
+    computerCameraButton.setAttribute('aria-pressed', String(!usePhone));
+    phoneCameraButton.setAttribute('aria-pressed', String(usePhone));
+    startButton.textContent = usePhone ? 'Connect phone camera' : 'Start camera + tracking';
+    phonePairing.style.display = usePhone ? 'block' : 'none';
+    phonePairingMessage.textContent = usePhone
+      ? location.protocol === 'https:'
+        ? 'Click “Connect phone camera” to create a one-time pairing code.'
+        : 'Phone pairing needs this app opened from an HTTPS-hosted address. The current localhost link only works on this computer.'
+      : 'Start the phone connection to get a pairing code.';
+    setStatus(usePhone ? 'Phone mode selected. HTTPS hosting is required for the phone camera.' : 'Computer webcam selected.');
+  }
+
+  computerCameraButton.addEventListener('click', () => chooseCameraSource('computer'));
+  phoneCameraButton.addEventListener('click', () => chooseCameraSource('phone'));
+
+  function loadPeerClient() {
+    if (window.Peer) return Promise.resolve(window.Peer);
+    if (!peerClientPromise) {
+      peerClientPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js';
+        script.onload = () => window.Peer ? resolve(window.Peer) : reject(new Error('PeerJS did not load. Check the internet connection and retry.'));
+        script.onerror = () => reject(new Error('Could not load the small phone-connection helper. Check the internet connection and retry.'));
+        document.head.appendChild(script);
+      });
+    }
+    return peerClientPromise;
+  }
+
+  async function showCameraStream(cameraStream, sourceName) {
+    activeStream = cameraStream;
+    video.srcObject = cameraStream;
+    await video.play();
+    stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    video.style.display = 'block';
+    overlay.style.display = 'block';
+    placeholder.style.display = 'none';
+    badge.textContent = sourceName === 'phone' ? 'Phone camera · hand tracking on' : 'Hand tracking on';
+    badge.style.display = 'block';
+    performanceReadout.style.display = 'block';
+    fullscreenButton.style.display = typeof stage.requestFullscreen === 'function' ? 'block' : 'none';
+    stopButton.disabled = false;
+    computerCameraButton.disabled = true;
+    phoneCameraButton.disabled = true;
+    calibrateButton.disabled = false;
+    cloneCalibrationStatus.textContent = 'Step out of the camera view, keep the camera still, then click “Capture empty background”.';
+    lastVideoTime = -1;
+    lastVideoTimeForStats = -1;
+    statsWindowStartedAt = 0;
+    cameraFramesInWindow = 0;
+    trackingUpdatesInWindow = 0;
+    setStatus(sourceName === 'phone' ? 'Phone camera connected — tracking is running on this computer.' : 'Tracker ready — show one or both hands to the camera.');
+    drawResults();
+  }
+
+  async function startPhoneReceiver() {
+    if (location.protocol !== 'https:') {
+      throw new Error('Phone camera needs the HTTPS-hosted version of this app. This localhost address is only reachable from this computer.');
+    }
+    const Peer = await loadPeerClient();
+    const randomPart = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const peerId = `jutsu${randomPart}`;
+    const phonePageUrl = new URL('./phone.html', location.href);
+    phonePageUrl.searchParams.set('peer', peerId);
+    phonePageLink.href = phonePageUrl.href;
+    phonePairingCode.textContent = peerId;
+    phonePairingMessage.textContent = 'Open phone.html on your phone, enter this code, then allow camera access.';
+    placeholder.innerHTML = '<strong>Waiting for phone camera</strong>Open phone.html on your phone and enter the pairing code below.';
+    placeholder.style.display = 'block';
+    stopButton.disabled = false;
+    computerCameraButton.disabled = true;
+    phoneCameraButton.disabled = true;
+    phonePeer = new Peer(peerId);
+    phonePeer.on('open', () => setStatus('Waiting for your phone to connect…'));
+    phonePeer.on('call', call => {
+      phoneCall?.close();
+      phoneCall = call;
+      call.answer();
+      call.on('stream', async incomingStream => {
+        if (phoneCall !== call) return;
+        try {
+          await showCameraStream(incomingStream, 'phone');
+        } catch (error) {
+          setStatus(`Could not show phone camera: ${error.message}`);
+        }
+      });
+      call.on('close', () => {
+        if (phoneCall !== call) return;
+        phoneCall = undefined;
+        activeStream = undefined;
+        cancelAnimationFrame(animationFrame);
+        animationFrame = undefined;
+        clonesVisible = false;
+        cloneLayer.classList.remove('active', 'removing');
+        jutsuEffect.classList.remove('active');
+        clearTimeout(cloneTimeout);
+        clearTimeout(effectTimeout);
+        cloneContexts.forEach((context, index) => context.clearRect(0, 0, cloneCanvases[index].width, cloneCanvases[index].height));
+        video.pause();
+        video.srcObject = null;
+        video.style.display = 'none';
+        overlay.style.display = 'none';
+        placeholder.innerHTML = '<strong>Phone disconnected</strong>Reconnect from phone.html using the same pairing code.';
+        placeholder.style.display = 'block';
+        setStatus('Phone disconnected. The same pairing code is still available.');
+      });
+      call.on('error', error => setStatus(`Phone connection error: ${error.message}`));
+    });
+    phonePeer.on('error', error => setStatus(`Phone pairing error: ${error.message}`));
+  }
+
+  function prepareHandTracker() {
+    if (workerReadyPromise) return workerReadyPromise;
+    setStatus('Starting the background hand tracker from local files…');
+    worker = new Worker('./hand-tracker-worker.js');
+    workerReadyPromise = new Promise((resolve, reject) => {
+      resolveWorkerReady = resolve;
+      rejectWorkerReady = reject;
+    });
+    worker.addEventListener('message', ({ data }) => {
+      if (data.type === 'ready') {
+        activeDelegate = data.delegate || 'CPU';
+        setStatus(data.delegate === 'GPU'
+          ? 'GPU tracking is ready — show one or both hands to the camera.'
+          : 'CPU tracking is ready — show one or both hands to the camera.');
+        resolveWorkerReady?.();
+        resolveWorkerReady = undefined;
+        rejectWorkerReady = undefined;
+        return;
+      }
+      if (data.type === 'result') {
+        workerBusy = false;
+        trackingUpdatesInWindow += 1;
+        latestInferenceMs = data.inferenceMs ?? 0;
+        latestLandmarks = data.landmarks.length ? smoothLandmarks(data.landmarks) : [];
+        processGesture(latestLandmarks);
+        if (!data.landmarks.length) previousLandmarks = [];
+        if (latestLandmarks.length) {
+          setStatus(`Tracking ${latestLandmarks.length} hand${latestLandmarks.length === 1 ? '' : 's'} — move your fingers to see the points follow.`);
+        } else {
+          setStatus('Tracker is ready — show one or both hands to the camera.');
+        }
+        return;
+      }
+      if (data.type === 'error') {
+        workerBusy = false;
+        workerFailed = true;
+        const error = new Error(data.message);
+        rejectWorkerReady?.(error);
+        rejectWorkerReady = undefined;
+        setStatus(`Hand tracker stopped: ${data.message}`);
+      }
+    });
+    worker.addEventListener('error', event => {
+      workerBusy = false;
+      workerFailed = true;
+      const error = new Error(event.message || 'The background hand tracker could not start.');
+      rejectWorkerReady?.(error);
+      rejectWorkerReady = undefined;
+      setStatus(error.message);
+    });
+    worker.postMessage({ type: 'init' });
+    return workerReadyPromise;
+  }
+
+  async function sendFrameToWorker(now) {
+    if (!worker || workerBusy || workerFailed || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (video.currentTime === lastVideoTime || now - lastFrameSentAt < DETECTION_INTERVAL_MS) return;
+    workerBusy = true;
+    lastFrameSentAt = now;
+    lastVideoTime = video.currentTime;
+    try {
+      const scale = Math.min(PROCESSING_WIDTH / video.videoWidth, PROCESSING_HEIGHT / video.videoHeight, 1);
+      const width = Math.max(1, Math.round(video.videoWidth * scale));
+      const height = Math.max(1, Math.round(video.videoHeight * scale));
+      processingSize = `${width}×${height}`;
+      const bitmap = await createImageBitmap(video, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' });
+      if (!activeStream || workerFailed) {
+        bitmap.close();
+        workerBusy = false;
+        return;
+      }
+      worker.postMessage({ type: 'frame', bitmap }, [bitmap]);
+    } catch (error) {
+      workerBusy = false;
+      workerFailed = true;
+      setStatus(`Could not prepare a camera frame: ${error.message}`);
+    }
+  }
+
+  function drawResults() {
+    if (activeStream && video.currentTime !== lastVideoTimeForStats) {
+      lastVideoTimeForStats = video.currentTime;
+      cameraFramesInWindow += 1;
+    }
+    const now = performance.now();
+    if (cloneLayer.classList.contains('active') && now - lastCloneFrameAt >= 33) {
+      updateCloneFrames();
+      lastCloneFrameAt = now;
+    }
+    if (statsWindowStartedAt === 0) statsWindowStartedAt = now;
+    if (now - statsWindowStartedAt >= 1000) {
+      const seconds = (now - statsWindowStartedAt) / 1000;
+      measuredCameraFps = cameraFramesInWindow / seconds;
+      measuredTrackingFps = trackingUpdatesInWindow / seconds;
+      cameraFramesInWindow = 0;
+      trackingUpdatesInWindow = 0;
+      statsWindowStartedAt = now;
+      performanceReadout.textContent = `Camera ${measuredCameraFps.toFixed(0)} FPS · tracking ${measuredTrackingFps.toFixed(0)} FPS · detect ${latestInferenceMs.toFixed(0)} ms · ${processingSize} · ${activeDelegate}`;
+    }
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    for (const landmarks of latestLandmarks) {
+      drawing.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#a99aff', lineWidth: 4 });
+      drawing.drawLandmarks(landmarks, { color: '#fff', fillColor: '#7c5cff', lineWidth: 2, radius: 5 });
+    }
+    sendFrameToWorker(now);
+    animationFrame = requestAnimationFrame(drawResults);
+  }
+
+  startButton.addEventListener('click', async () => {
+    startButton.disabled = true;
+    computerCameraButton.disabled = true;
+    phoneCameraButton.disabled = true;
+    try {
+      if (cameraSource === 'phone' && location.protocol !== 'https:') {
+        throw new Error('Phone camera needs the HTTPS-hosted version of this app. This localhost address is only reachable from this computer.');
+      }
+      await prepareHandTracker();
+      latestLandmarks = [];
+      previousLandmarks = [];
+      sealStartedAt = 0;
+      sealLastSeenAt = 0;
+      clonesVisible = false;
+      jutsuEffect.classList.remove('active');
+      cloneLayer.classList.remove('active', 'removing');
+      clearTimeout(cloneTimeout);
+      clearTimeout(effectTimeout);
+      backgroundPixels = null;
+      calibrateButton.textContent = 'Capture empty background';
+      cloneContexts.forEach((context, index) => context.clearRect(0, 0, cloneCanvases[index].width, cloneCanvases[index].height));
+      workerBusy = false;
+      workerFailed = false;
+      lastVideoTime = -1;
+      lastVideoTimeForStats = -1;
+      lastFrameSentAt = 0;
+      statsWindowStartedAt = 0;
+      cameraFramesInWindow = 0;
+      trackingUpdatesInWindow = 0;
+      if (cameraSource === 'phone') {
+        await startPhoneReceiver();
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is unavailable. Open this page through Start Jutsu Cam.bat in a modern browser.');
+      }
+      setStatus('Waiting for camera permission…');
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 20, max: 30 }
+        },
+        audio: false
+      });
+      calibrateButton.textContent = 'Capture empty background';
+      cloneCalibrationStatus.textContent = 'Step out of the camera view, keep the camera still, then click “Capture empty background”.';
+      await showCameraStream(localStream, 'computer');
+    } catch (error) {
+      const messages = {
+        NotAllowedError: 'Camera permission was blocked. Allow it in your browser’s site settings, then try again.',
+        NotFoundError: 'No camera was found. Check that a webcam is connected.',
+        NotReadableError: 'The camera may be in use by another app. Close that app and try again.'
+      };
+      setStatus(messages[error.name] || `Could not start tracking: ${error.message}`);
+      localStream?.getTracks().forEach(track => track.stop());
+      localStream = undefined;
+      phoneCall?.close();
+      phoneCall = undefined;
+      phonePeer?.destroy();
+      phonePeer = undefined;
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      computerCameraButton.disabled = false;
+      phoneCameraButton.disabled = false;
+    }
+  });
+
+  stopButton.addEventListener('click', () => {
+    cancelAnimationFrame(animationFrame);
+    animationFrame = undefined;
+    if (document.fullscreenElement === stage) document.exitFullscreen().catch(() => {});
+    localStream?.getTracks().forEach(track => track.stop());
+    localStream = undefined;
+    phoneCall?.close();
+    phoneCall = undefined;
+    phonePeer?.destroy();
+    phonePeer = undefined;
+    activeStream = undefined;
+    latestLandmarks = [];
+    previousLandmarks = [];
+    video.srcObject = null;
+    video.style.display = 'none';
+    overlay.style.display = 'none';
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    placeholder.style.display = 'block';
+    badge.style.display = 'none';
+    performanceReadout.style.display = 'none';
+    fullscreenButton.style.display = 'none';
+    computerCameraButton.disabled = false;
+    phoneCameraButton.disabled = false;
+    stage.style.aspectRatio = '16 / 9';
+    setStatus('Camera stopped.');
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    calibrateButton.disabled = true;
+    backgroundPixels = null;
+    clonesVisible = false;
+    cloneLayer.classList.remove('active', 'removing');
+    jutsuEffect.classList.remove('active');
+    clearTimeout(cloneTimeout);
+    clearTimeout(effectTimeout);
+    cloneContexts.forEach((context, index) => context.clearRect(0, 0, cloneCanvases[index].width, cloneCanvases[index].height));
+    calibrateButton.textContent = 'Capture empty background';
+    cloneCalibrationStatus.textContent = 'To make a body-shaped clone, start the camera, step out of view, then capture the empty background.';
+  });
+</script>
+</body>
+</html>
+
+
+
+
+
